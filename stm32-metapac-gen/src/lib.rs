@@ -376,7 +376,6 @@ fn gen_memory_x(out_dir: &Path, chip: &Chip) {
         .map(|r| (r.address, r.size))
         .reduce(|acc, el| (u32::min(acc.0, el.0), acc.1 + el.1))
         .unwrap();
-    let ram = chip.memory.iter().find(|r| r.kind == MemoryRegionKind::Ram).unwrap();
     let otp = chip
         .memory
         .iter()
@@ -391,11 +390,16 @@ fn gen_memory_x(out_dir: &Path, chip: &Chip) {
         flash.map(|x| x.name.as_ref()).collect::<Vec<&str>>().join(" + ")
     )
     .unwrap();
+    let (ram_address, ram_size) = chip.memory.iter()
+        .filter(|r| r.kind == MemoryRegionKind::Ram)
+        .map(|r| (r.address, r.size))
+        .reduce(|acc, el| (u32::min(acc.0, el.0), acc.1 + el.1))
+        .unwrap();
     writeln!(
         memory_x,
         "    RAM   : ORIGIN = 0x{:08x}, LENGTH = {:>4}K",
-        ram.address,
-        ram.size / 1024,
+        ram_address,
+        ram_size / 1024,
     )
     .unwrap();
     if let Some(otp) = otp {

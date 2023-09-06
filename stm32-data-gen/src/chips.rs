@@ -57,6 +57,7 @@ mod xml {
     }
 }
 
+#[derive(Debug)]
 pub struct Chip {
     flash: u32,
     ram: u32,
@@ -1190,11 +1191,14 @@ fn process_chip(
             }
         }
     }
-    let mut found = HashSet::new();
+    let mut found = HashMap::new();
+    let ram_pool = memory.ram.address as i64..
+                   (memory.ram.address + memory.ram.bytes) as i64;
     for each in [
         "SRAM",
         "SRAM1",
         "SRAM2",
+        "RAMDTCM",
         "D1_AXISRAM",
         "D1_ITCMRAM",
         "D1_DTCMRAM",
@@ -1210,34 +1214,45 @@ fn process_chip(
                 each => each,
             };
 
-            if found.contains(key) {
+            if memory.device_id == 0x451 && chip_name == "STM32F767VI" {
+                eprintln!("CHIP: {chip_name} {chip:?} MEM: 0x{:x} 0x{:x}", memory.ram.address, memory.ram.bytes);
+                eprintln!("{each}_BASE: 0x{address:x} total 0x{ram_total:x}");
+            }
+
+            if found.contains_key(key) {
                 continue;
             }
-            found.insert(key);
-
-            let size = if key == "SRAM" {
-                // if memory.ram.bytes != ram_total {
-                //     println!(
-                //         "SRAM mismatch for chip {} with die {}: Expected {} was {}",
-                //         chip_name,
-                //         group.die.as_ref().unwrap(),
-                //         ram_total,
-                //         memory.ram.bytes,
-                //     );
-                // }
-                std::cmp::min(memory.ram.bytes, ram_total)
-            } else {
-                0
-            };
-
-            memory_regions.push(stm32_data_serde::chip::Memory {
-                name: key.to_string(),
-                kind: stm32_data_serde::chip::memory::Kind::Ram,
-                address: u32::try_from(*address).unwrap(),
-                size,
-                settings: None,
-            })
+            if ram_pool.contains(address) {
+                found.insert(key, address);
+            }
+            else {
+                // println!(
+                //     "SRAM mismatch for chip {} with die {}: Expected range {:?} was {} base {}",
+                //     chip_name,
+                //     group.die.as_ref().unwrap(),
+                //     ram_pool,
+                //     address,
+                //     each
+                // );
+            }
         }
+    }
+    let mut ram_regions: Vec<_> = found.into_iter().collect();
+    ram_regions.sort_by_key(|(_, a)| *a);
+    let mut ram_banks: Vec<_> = ram_regions.windows(2)
+                            .map(|pair| (pair[0].0, pair[0].1, u32::try_from(pair[1].1 - pair[0].1).unwrap()))
+                            .collect();
+    if let Some((name, addr)) = ram_regions.last().copied() {
+        ram_banks.push((name, addr, u32::try_from(ram_pool.end - addr).unwrap()));
+    }
+    for (key, address, size) in ram_banks {
+        memory_regions.push(stm32_data_serde::chip::Memory {
+            name: key.to_string(),
+            kind: stm32_data_serde::chip::memory::Kind::Ram,
+            address: u32::try_from(*address).unwrap(),
+            size,
+            settings: None,
+        })
     }
     let docs = docs.documents_for(chip_name);
     let chip = stm32_data_serde::Chip {
